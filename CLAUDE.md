@@ -10,19 +10,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Testing:**
 ```bash
-pytest                                      # Run all tests
-pytest --cov=fairque --cov-report=html    # Run tests with coverage
-pytest tests/unit/                         # Unit tests only  
-pytest tests/integration/                  # Integration tests only
-pytest tests/performance/                  # Performance tests only
-pytest -k "test_specific_function"         # Run specific test
+uv run pytest                                      # Run all tests
+uv run pytest --cov=fairque --cov-report=html    # Run tests with coverage
+uv run pytest tests/unit/                         # Unit tests only  
+uv run pytest tests/integration/                  # Integration tests only
+uv run pytest tests/performance/                  # Performance tests only
+uv run pytest -k "test_specific_function"         # Run specific test
 ```
 
 **Code Quality:**
 ```bash
-ruff check .                               # Lint code
-ruff format .                              # Format code
-mypy fairque/                              # Type checking
+uv run ruff check .                               # Lint code
+uv run ruff format .                              # Format code
+uv run mypy fairque/                              # Type checking
 ```
 
 **Package Management:**
@@ -63,7 +63,6 @@ uv add package-name                        # Add new dependency
 ```
 queue:user:{user_id}:critical  # CRITICAL priority tasks (FIFO)
 queue:user:{user_id}:normal    # Priority 1-5 tasks (score-based)
-dlq                           # Dead letter queue for failed tasks
 queue:stats                   # Queue statistics
 xcom:{key}                    # Cross-task communication data
 ```
@@ -127,7 +126,7 @@ with TaskQueue(config) as queue:
 ```
 
 **Task States:**
-Tasks have states: `queued`, `started`, `deferred`, `finished`, `failed`, `canceled`, `scheduled`, `stopped`
+Tasks have states: `queued`, `started`, `deferred`, `finished`, `failed`, `canceled`, `scheduled`
 - `deferred`: Task waiting for dependencies to complete
 - Dependencies are user-scoped only
 - Cycle detection prevents circular dependencies
