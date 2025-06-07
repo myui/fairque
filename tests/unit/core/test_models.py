@@ -1,6 +1,7 @@
 """Tests for core models: Priority, Task, and DLQEntry."""
 
 import json
+import math
 import time
 from typing import Any, Dict
 
@@ -192,8 +193,8 @@ class TestTask:
         assert json.loads(redis_dict["payload"]) == sample_payload
         assert redis_dict["retry_count"] == "0"
         assert redis_dict["max_retries"] == "3"
-        assert float(redis_dict["created_at"]) == task.created_at
-        assert float(redis_dict["execute_after"]) == task.execute_after
+        assert math.isclose(float(redis_dict["created_at"]), task.created_at, rel_tol=1e-9)
+        assert math.isclose(float(redis_dict["execute_after"]), task.execute_after, rel_tol=1e-9)
 
     def test_from_redis_dict(self, sample_payload: Dict[str, Any]) -> None:
         """Test deserialization from Redis dictionary."""

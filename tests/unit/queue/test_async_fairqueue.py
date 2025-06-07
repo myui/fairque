@@ -259,7 +259,7 @@ class TestAsyncTaskQueue:
         """Test async context manager functionality."""
         with patch('fairque.queue.async_queue.redis.Redis') as mock_redis_class:
             mock_redis_instance = AsyncMock()
-            mock_redis_instance.ping.return_value = True
+            mock_redis_instance.ping = AsyncMock(return_value=True)
             mock_redis_class.return_value = mock_redis_instance
 
             async with AsyncTaskQueue(async_queue_config) as queue:

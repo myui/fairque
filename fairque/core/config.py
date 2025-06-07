@@ -33,7 +33,6 @@ class RedisConfig:
 
     # Connection pool configuration
     max_connections: Optional[int] = None
-    retry_on_timeout: bool = False
 
     def validate(self) -> None:
         """Validate Redis configuration parameters.
@@ -831,8 +830,7 @@ class FairQueueConfig:
                 "ssl_ca_certs": self.redis.ssl_ca_certs,
                 "ssl_certfile": self.redis.ssl_certfile,
                 "ssl_keyfile": self.redis.ssl_keyfile,
-                "max_connections": self.redis.max_connections,
-                "retry_on_timeout": self.redis.retry_on_timeout
+                "max_connections": self.redis.max_connections
             },
             "queue": {
                 "stats_prefix": self.queue.stats_prefix,

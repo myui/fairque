@@ -60,7 +60,6 @@ class AsyncTaskQueue:
                     socket_timeout=config.redis.socket_timeout,
                     socket_connect_timeout=config.redis.socket_connect_timeout,
                     max_connections=config.redis.max_connections,
-                    retry_on_timeout=config.redis.retry_on_timeout,
                     decode_responses=True,
                 )
             except redis.RedisError as e:
