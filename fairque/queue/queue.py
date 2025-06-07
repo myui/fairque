@@ -27,7 +27,7 @@ class TaskQueue:
     This implementation provides:
     - Unified state management with fq: prefix
     - Integrated dependency resolution
-    - Enhanced failure tracking (unified DLQ)
+    - Enhanced failure tracking
     - TTL-based cleanup
     - Comprehensive monitoring
     """
@@ -499,7 +499,16 @@ class TaskQueue:
         """Push multiple tasks in a batch."""
         results = []
         for task in tasks:
-            results.append(self.enqueue(task))
+            try:
+                result = self.enqueue(task)
+                results.append(result)
+            except Exception as e:
+                # Convert exception to error result
+                results.append({
+                    "success": False,
+                    "error": str(e),
+                    "task_id": getattr(task, 'task_id', None)
+                })
         return results
 
     def pop(self, user_list: Optional[List[str]] = None, worker_id: Optional[str] = None) -> Optional[Task]:
@@ -509,9 +518,10 @@ class TaskQueue:
     def delete_task(self, task_id: str) -> bool:
         """Delete a task permanently."""
         try:
-            # Remove from all possible locations
-            result = self.lua_manager.execute_script('state_ops', args=['delete_task', task_id])
-            return bool(result)
+            # Delete the task data
+            task_key = RedisKeys.task_data(task_id)
+            result = self.redis.delete(task_key)
+            return result > 0
         except redis.RedisError as e:
             logger.error(f"Failed to delete task {task_id}: {e}")
             return False
@@ -529,16 +539,115 @@ class TaskQueue:
             logger.error(f"Failed to get metrics: {e}")
             return {"error": str(e)}
 
-    def get_queue_sizes(self) -> Dict[str, int]:
-        """Alias for get_state_stats for backward compatibility."""
-        return self.get_state_stats()
+    def get_stats(self) -> Dict[str, Any]:
+        """Get comprehensive queue statistics.
+        
+        Returns:
+            Dictionary with queue statistics
+        """
+        try:
+            response_str = self.lua_manager.execute_script("stats")
+            response: Dict[str, Any] = json.loads(response_str)
+            
+            if not response.get("success", False):
+                error_message = response.get("message", "Unknown error")
+                logger.error(f"Failed to get stats: {error_message}")
+                return {}
+                
+            return response.get("data", {})
+        except (LuaScriptError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to get stats: {e}")
+            return {}
+
+    def get_health(self) -> Dict[str, Any]:
+        """Get queue health information.
+        
+        Returns:
+            Dictionary with health status
+        """
+        try:
+            stats = self.get_stats()
+            active_tasks = stats.get("tasks_active", 0)
+            
+            # TODO: Determine health status
+            status = "healthy"
+
+            return {
+                "status": status,
+                "active_tasks": active_tasks,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get health: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
+    def get_queue_sizes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get queue sizes for a specific user or overall stats.
+        
+        Args:
+            user_id: Optional user ID to get sizes for specific user
+            
+        Returns:
+            Dictionary with queue size information
+        """
+        if user_id:
+            return self.get_user_queue_sizes(user_id)
+        else:
+            return self.get_state_stats()
 
     def get_batch_queue_sizes(self, user_ids: List[str]) -> Dict[str, Dict[str, int]]:
         """Get queue sizes for multiple users."""
         result = {}
+        totals = {"critical_size": 0, "normal_size": 0, "total_size": 0}
+        
         for user_id in user_ids:
-            result[user_id] = self.get_user_queue_sizes(user_id)
+            user_sizes = self.get_user_queue_sizes(user_id)
+            result[user_id] = user_sizes
+            totals["critical_size"] += user_sizes.get("critical_size", 0)
+            totals["normal_size"] += user_sizes.get("normal_size", 0) 
+            totals["total_size"] += user_sizes.get("total_size", 0)
+            
+        result["totals"] = totals
         return result
+
+    def cleanup_expired_tasks(self, max_age_seconds: int = 86400) -> int:
+        """Clean up expired tasks.
+        
+        Args:
+            max_age_seconds: Maximum age for tasks before cleanup
+            
+        Returns:
+            Number of tasks cleaned up
+        """
+        import time
+        current_time = time.time()
+        cutoff_time = current_time - max_age_seconds
+        
+        try:
+            # Scan for task keys
+            task_keys = list(self.redis.scan_iter(match="task:*"))
+            cleaned_count = 0
+            
+            for task_key in task_keys:
+                # Get task creation time
+                created_at_str = self.redis.hget(task_key, "created_at")
+                if created_at_str:
+                    try:
+                        created_at = float(created_at_str)
+                        if created_at < cutoff_time:
+                            # Task is expired, delete it
+                            if self.redis.delete(task_key):
+                                cleaned_count += 1
+                    except (ValueError, TypeError):
+                        # Invalid timestamp, skip
+                        continue
+                        
+            return cleaned_count
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired tasks: {e}")
+            return 0
 
     def close(self) -> None:
         """Close Redis connection and cleanup resources."""

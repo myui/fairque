@@ -5,7 +5,6 @@
 local CRITICAL_SUFFIX = ":critical"
 local NORMAL_SUFFIX = ":normal"
 local STATS_KEY = "queue:stats"
-local DLQ_KEY = "dlq"
 
 -- Error codes
 local ERR_INVALID_ARGS = "ERR_INVALID_ARGS"
@@ -57,10 +56,6 @@ local function get_comprehensive_stats()
         local value = tonumber(all_stats[i + 1]) or all_stats[i + 1]
         stats[key] = value
     end
-
-    -- Get DLQ size
-    local dlq_size = redis.call("LLEN", DLQ_KEY)
-    stats.dlq_size = dlq_size
 
     -- Add current timestamp
     stats.current_time = current_time
@@ -146,7 +141,6 @@ local function get_basic_metrics()
     return {
         total_tasks = (stats.tasks_pushed_total or 0) - (stats.tasks_popped_total or 0),
         active_workers = 0, -- Will be calculated from worker heartbeats
-        dlq_size = stats.dlq_size or 0,
         push_rate = stats.tasks_pushed_total_rate or 0,
         pop_rate = stats.tasks_popped_total_rate or 0
     }
@@ -311,7 +305,6 @@ elseif operation == "get_health" then
     response_data = {
         status = "healthy",
         active_tasks = stats.tasks_active or 0,
-        dlq_size = stats.dlq_size or 0,
         total_pushed = stats.tasks_pushed_total or 0,
         total_popped = stats.tasks_popped_total or 0,
         uptime_seconds = current_time,
@@ -319,14 +312,7 @@ elseif operation == "get_health" then
     }
 
     -- Determine health status based on metrics
-    local dlq_threshold = 1000  -- Alert if DLQ has more than 1000 tasks
     local active_threshold = 10000  -- Alert if more than 10k active tasks
-
-    if (stats.dlq_size or 0) > dlq_threshold then
-        response_data.status = "warning"
-        response_data.warnings = response_data.warnings or {}
-        table.insert(response_data.warnings, "DLQ size exceeds threshold: " .. (stats.dlq_size or 0))
-    end
 
     if (stats.tasks_active or 0) > active_threshold then
         response_data.status = "warning"

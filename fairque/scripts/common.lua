@@ -4,7 +4,6 @@
 -- Constants
 local CRITICAL_SUFFIX = ":critical"
 local NORMAL_SUFFIX = ":normal"
-local DLQ_KEY = "dlq"
 local STATS_KEY = "queue:stats"
 
 -- Error codes
@@ -228,7 +227,6 @@ return {
     -- Constants
     CRITICAL_SUFFIX = CRITICAL_SUFFIX,
     NORMAL_SUFFIX = NORMAL_SUFFIX,
-    DLQ_KEY = DLQ_KEY,
     STATS_KEY = STATS_KEY,
     
     -- Error codes

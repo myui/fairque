@@ -31,7 +31,7 @@ from fairque.core.exceptions import (
     TaskSerializationError,
     TaskValidationError,
 )
-from fairque.core.models import DLQEntry, Priority, Task, TaskState
+from fairque.core.models import Priority, Task, TaskState
 from fairque.core.pipeline import (
     Executable,
     ParallelGroup,
@@ -59,7 +59,6 @@ __all__ = [
     "Priority",
     "Task",
     "TaskState",
-    "DLQEntry",
     # Pipeline functionality
     "Executable",
     "Pipeline",

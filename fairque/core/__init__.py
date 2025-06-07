@@ -9,12 +9,11 @@ from fairque.core.exceptions import (
     TaskSerializationError,
     TaskValidationError,
 )
-from fairque.core.models import DLQEntry, Priority, Task
+from fairque.core.models import Priority, Task
 
 __all__ = [
     "Priority",
     "Task",
-    "DLQEntry",
     "FairQueueConfig",
     "RedisConfig",
     "WorkerConfig",

@@ -3,49 +3,13 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional, Set
 
+from fairque.core.interfaces import Executable
 from fairque.core.models import Task, detect_dependency_cycle
 
 logger = logging.getLogger(__name__)
-
-
-class Executable(ABC):
-    """Abstract base for executable items (Tasks and TaskGroups)."""
-
-    @abstractmethod
-    def get_tasks(self) -> List[Task]:
-        """Get all tasks in this executable."""
-        pass
-
-    @abstractmethod
-    def get_task_ids(self) -> Set[str]:
-        """Get all task IDs in this executable."""
-        pass
-
-    @abstractmethod
-    def get_upstream_task_ids(self) -> Set[str]:
-        """Get task IDs that should be dependencies for this executable."""
-        pass
-
-    @abstractmethod
-    def get_downstream_task_ids(self) -> Set[str]:
-        """Get task IDs that should depend on this executable."""
-        pass
-
-    def __rshift__(self, other: Executable) -> Pipeline:
-        """Implement >> operator for task dependencies."""
-        return Pipeline([self, other])
-
-    def __lshift__(self, other: Executable) -> Pipeline:
-        """Implement << operator for reverse dependencies."""
-        return Pipeline([other, self])
-
-    def __or__(self, other: Executable) -> ParallelGroup:
-        """Implement | operator for parallel execution."""
-        return ParallelGroup([self, other])
 
 
 @dataclass
@@ -113,7 +77,7 @@ class SequentialGroup(TaskGroup):
     def expand_dependencies(self) -> List[Task]:
         """Expand sequential dependencies and return modified tasks."""
         tasks = self.get_tasks()
-        if len(tasks) <= 1:
+        if len(tasks) == 0:
             return tasks
 
         expanded_tasks = []
@@ -127,23 +91,17 @@ class SequentialGroup(TaskGroup):
                 # First task gets group's upstream dependencies
                 if self._upstream_dependencies:
                     new_depends_on = list(set(task.depends_on) | self._upstream_dependencies)
-                    modified_task = task.__class__(
-                        **{**task.__dict__, 'depends_on': new_depends_on}
-                    )
+                    modified_task = replace(task, depends_on=new_depends_on)
             else:
                 # Subsequent tasks depend on previous task
                 prev_task_id = tasks[i-1].task_id
                 new_depends_on = list(set(task.depends_on) | {prev_task_id})
-                modified_task = task.__class__(
-                    **{**task.__dict__, 'depends_on': new_depends_on}
-                )
+                modified_task = replace(task, depends_on=new_depends_on)
 
             # Add downstream dependents to last task
             if i == len(tasks) - 1 and self._downstream_dependents:
                 new_dependents = list(set(modified_task.dependents) | self._downstream_dependents)
-                modified_task = modified_task.__class__(
-                    **{**modified_task.__dict__, 'dependents': new_dependents}
-                )
+                modified_task = replace(modified_task, dependents=new_dependents)
 
             expanded_tasks.append(modified_task)
 
@@ -164,16 +122,12 @@ class ParallelGroup(TaskGroup):
             # All tasks get group's upstream dependencies
             if self._upstream_dependencies:
                 new_depends_on = list(set(task.depends_on) | self._upstream_dependencies)
-                modified_task = task.__class__(
-                    **{**task.__dict__, 'depends_on': new_depends_on}
-                )
+                modified_task = replace(task, depends_on=new_depends_on)
 
             # All tasks get group's downstream dependents
             if self._downstream_dependents:
                 new_dependents = list(set(modified_task.dependents) | self._downstream_dependents)
-                modified_task = modified_task.__class__(
-                    **{**modified_task.__dict__, 'dependents': new_dependents}
-                )
+                modified_task = replace(modified_task, dependents=new_dependents)
 
             expanded_tasks.append(modified_task)
 
