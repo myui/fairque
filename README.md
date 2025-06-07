@@ -18,6 +18,128 @@ Production-ready fair queue implementation using Redis with work stealing and pr
 - ⏰ **Task Scheduling**: Cron-based task scheduling with distributed coordination
 - 📊 **Task States**: Comprehensive state management with 7 states (queued, started, deferred, finished, failed, canceled, scheduled)
 
+## Key Differentiators vs. Existing Task Queues (RQ, Celery, etc.)
+
+FairQueue goes beyond simple task queuing with production-ready features for complex multi-tenant applications:
+
+### 🏢 **1. Multi-Tenancy with Fair Resource Allocation**
+**Problem**: Traditional queues like RQ use simple FIFO, allowing high-volume users to monopolize resources.
+**Solution**: FairQueue implements true fair scheduling with round-robin user selection.
+
+```python
+# RQ: Tasks processed in order submitted - user1 can starve user2
+# user1 submits 1000 tasks, user2 submits 1 task → user2 waits behind all 1000
+
+# FairQueue: Guaranteed fair access across users
+config = FairQueueConfig.create_default(
+    assigned_users=["user:1", "user:2", "user:3"]  # Equal processing opportunity
+)
+# Round-robin: user1 → user2 → user3 → user1, regardless of task volume
+```
+
+### ⚡ **2. Intelligent Resource Utilization with Work Stealing**
+**Problem**: Traditional workers are idle when their assigned queues are empty, even if other queues have work.
+**Solution**: FairQueue workers can steal tasks from other users when idle, maximizing throughput.
+
+```python
+# Traditional: Worker assigned to user:1 sits idle if user:1 has no tasks
+# FairQueue: Worker processes assigned users first, then steals from targets
+config = FairQueueConfig.create_default(
+    worker_id="worker-001",
+    assigned_users=["user:1", "user:2"],      # Primary responsibility
+    steal_targets=["user:3", "user:4"]        # Secondary work when idle
+)
+# Result: 100% worker utilization + maintains fairness guarantees
+```
+
+### 🔗 **3. Built-in XCom for Cross-Task Communication**
+**Problem**: RQ has no native way for tasks to share data - requires external storage or manual Redis operations.
+**Solution**: FairQueue includes XCom system for seamless task-to-task data passing.
+
+```python
+# RQ: Manual data passing via external storage
+def task1():
+    result = process_data()
+    redis.set("shared_data", json.dumps(result))  # Manual
+
+def task2():
+    data = json.loads(redis.get("shared_data"))   # Manual
+
+# FairQueue: Built-in XCom with automatic data management
+@xcom_task(push_key="processed_data", auto_xcom=True)
+def task1():
+    return process_data()  # Automatically stored
+
+@task(depends_on=["task1"], enable_xcom=True)
+def task2():
+    data = self.xcom_pull("processed_data")  # Automatic retrieval
+```
+
+### 🔄 **4. DAG Workflows Beyond Simple Task Queues**
+**Problem**: RQ is a simple job queue - complex workflows require external orchestration tools.
+**Solution**: FairQueue includes dependencies, pipelines, and DAG support built-in.
+
+```python
+# RQ: No dependency management - manual orchestration required
+# Must manually track completion and trigger dependent tasks
+
+# FairQueue: Full DAG support with pipeline operators
+@task(task_id="extract")
+def extract_data(): return {"records": 1000}
+
+@task(task_id="transform", depends_on=["extract"])
+def transform_data(): return {"processed": 2000}
+
+@task(task_id="load", depends_on=["transform"])
+def load_data(): return {"loaded": True}
+
+# Airflow-style pipeline composition
+pipeline = extract_data() >> transform_data() >> load_data()
+parallel_pipeline = extract_data() >> (transform_data() | validate_data()) >> load_data()
+
+queue.enqueue(pipeline)  # Automatic dependency resolution
+```
+
+### 🎯 **Multi-Tenant SaaS Applications**
+Perfect for applications where fair resource allocation is critical:
+- **E-commerce platforms**: Fair order processing across merchants
+- **Data processing services**: Equitable resource sharing across customers
+- **API gateways**: Preventing resource monopolization by high-volume clients
+- **Batch processing systems**: Balanced workload distribution
+
+### 🚀 **Horizontal Scaling with Intelligence**
+Add workers dynamically with automatic work distribution:
+```python
+# Scale by adding workers with smart assignment
+workers = [
+    {"id": "worker-001", "assigned_users": ["user:1", "user:3"], "steal_targets": ["user:2", "user:4"]},
+    {"id": "worker-002", "assigned_users": ["user:2", "user:4"], "steal_targets": ["user:1", "user:3"]},
+    {"id": "worker-003", "assigned_users": ["user:5", "user:6"], "steal_targets": ["user:1", "user:2"]}
+]
+# Result: Perfect load balancing + no resource waste + maintained fairness
+```
+
+## Why "Fair"?
+
+The name **FairQueue** reflects the core principle of **fairness** in task distribution and processing:
+
+### 🎯 **Fair Task Distribution**
+- **Round-robin user selection**: Each user gets equal opportunity for their tasks to be processed
+- **No user starvation**: High-volume users cannot monopolize worker resources
+- **Balanced workload**: Tasks are distributed evenly across workers through work stealing
+
+### ⚖️ **Fair Resource Allocation**
+- **Priority-aware fairness**: Critical tasks get immediate attention while maintaining fairness among normal priorities
+- **Worker equity**: All workers have equal opportunity to process tasks from their assigned users
+- **Dynamic load balancing**: Work stealing ensures optimal resource utilization without unfair advantage
+
+### 🔄 **Fair Processing Order**
+- **Within user fairness**: Tasks from the same user are processed in priority order
+- **Cross-user fairness**: No single user can dominate the queue regardless of task volume
+- **Temporal fairness**: Tasks are processed in a predictable, fair manner based on submission time and priority
+
+This fairness model makes FairQueue ideal for multi-tenant systems, SaaS platforms, and any application where equitable resource sharing is crucial for user experience and system stability.
+
 ## Quick Start
 
 ### Installation
@@ -293,128 +415,6 @@ config = FairQueueConfig.create_default(
     steal_targets=["user:3", "user:4"]
 )
 ```
-
-## Key Differentiators vs. Existing Task Queues (RQ, Celery, etc.)
-
-FairQueue goes beyond simple task queuing with production-ready features for complex multi-tenant applications:
-
-### 🏢 **1. Multi-Tenancy with Fair Resource Allocation**
-**Problem**: Traditional queues like RQ use simple FIFO, allowing high-volume users to monopolize resources.
-**Solution**: FairQueue implements true fair scheduling with round-robin user selection.
-
-```python
-# RQ: Tasks processed in order submitted - user1 can starve user2
-# user1 submits 1000 tasks, user2 submits 1 task → user2 waits behind all 1000
-
-# FairQueue: Guaranteed fair access across users
-config = FairQueueConfig.create_default(
-    assigned_users=["user:1", "user:2", "user:3"]  # Equal processing opportunity
-)
-# Round-robin: user1 → user2 → user3 → user1, regardless of task volume
-```
-
-### ⚡ **2. Intelligent Resource Utilization with Work Stealing**
-**Problem**: Traditional workers are idle when their assigned queues are empty, even if other queues have work.
-**Solution**: FairQueue workers can steal tasks from other users when idle, maximizing throughput.
-
-```python
-# Traditional: Worker assigned to user:1 sits idle if user:1 has no tasks
-# FairQueue: Worker processes assigned users first, then steals from targets
-config = FairQueueConfig.create_default(
-    worker_id="worker-001",
-    assigned_users=["user:1", "user:2"],      # Primary responsibility
-    steal_targets=["user:3", "user:4"]        # Secondary work when idle
-)
-# Result: 100% worker utilization + maintains fairness guarantees
-```
-
-### 🔗 **3. Built-in XCom for Cross-Task Communication**
-**Problem**: RQ has no native way for tasks to share data - requires external storage or manual Redis operations.
-**Solution**: FairQueue includes XCom system for seamless task-to-task data passing.
-
-```python
-# RQ: Manual data passing via external storage
-def task1():
-    result = process_data()
-    redis.set("shared_data", json.dumps(result))  # Manual
-
-def task2():
-    data = json.loads(redis.get("shared_data"))   # Manual
-
-# FairQueue: Built-in XCom with automatic data management
-@xcom_task(push_key="processed_data", auto_xcom=True)
-def task1():
-    return process_data()  # Automatically stored
-
-@task(depends_on=["task1"], enable_xcom=True)
-def task2():
-    data = self.xcom_pull("processed_data")  # Automatic retrieval
-```
-
-### 🔄 **4. DAG Workflows Beyond Simple Task Queues**
-**Problem**: RQ is a simple job queue - complex workflows require external orchestration tools.
-**Solution**: FairQueue includes dependencies, pipelines, and DAG support built-in.
-
-```python
-# RQ: No dependency management - manual orchestration required
-# Must manually track completion and trigger dependent tasks
-
-# FairQueue: Full DAG support with pipeline operators
-@task(task_id="extract")
-def extract_data(): return {"records": 1000}
-
-@task(task_id="transform", depends_on=["extract"])
-def transform_data(): return {"processed": 2000}
-
-@task(task_id="load", depends_on=["transform"])
-def load_data(): return {"loaded": True}
-
-# Airflow-style pipeline composition
-pipeline = extract_data() >> transform_data() >> load_data()
-parallel_pipeline = extract_data() >> (transform_data() | validate_data()) >> load_data()
-
-queue.enqueue(pipeline)  # Automatic dependency resolution
-```
-
-### 🎯 **Multi-Tenant SaaS Applications**
-Perfect for applications where fair resource allocation is critical:
-- **E-commerce platforms**: Fair order processing across merchants
-- **Data processing services**: Equitable resource sharing across customers
-- **API gateways**: Preventing resource monopolization by high-volume clients
-- **Batch processing systems**: Balanced workload distribution
-
-### 🚀 **Horizontal Scaling with Intelligence**
-Add workers dynamically with automatic work distribution:
-```python
-# Scale by adding workers with smart assignment
-workers = [
-    {"id": "worker-001", "assigned_users": ["user:1", "user:3"], "steal_targets": ["user:2", "user:4"]},
-    {"id": "worker-002", "assigned_users": ["user:2", "user:4"], "steal_targets": ["user:1", "user:3"]},
-    {"id": "worker-003", "assigned_users": ["user:5", "user:6"], "steal_targets": ["user:1", "user:2"]}
-]
-# Result: Perfect load balancing + no resource waste + maintained fairness
-```
-
-## Why "Fair"?
-
-The name **FairQueue** reflects the core principle of **fairness** in task distribution and processing:
-
-### 🎯 **Fair Task Distribution**
-- **Round-robin user selection**: Each user gets equal opportunity for their tasks to be processed
-- **No user starvation**: High-volume users cannot monopolize worker resources
-- **Balanced workload**: Tasks are distributed evenly across workers through work stealing
-
-### ⚖️ **Fair Resource Allocation**
-- **Priority-aware fairness**: Critical tasks get immediate attention while maintaining fairness among normal priorities
-- **Worker equity**: All workers have equal opportunity to process tasks from their assigned users
-- **Dynamic load balancing**: Work stealing ensures optimal resource utilization without unfair advantage
-
-### 🔄 **Fair Processing Order**
-- **Within user fairness**: Tasks from the same user are processed in priority order
-- **Cross-user fairness**: No single user can dominate the queue regardless of task volume
-- **Temporal fairness**: Tasks are processed in a predictable, fair manner based on submission time and priority
-
-This fairness model makes FairQueue ideal for multi-tenant systems, SaaS platforms, and any application where equitable resource sharing is crucial for user experience and system stability.
 
 ## Architecture
 
