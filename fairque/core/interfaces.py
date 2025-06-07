@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Set
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Set
 
 if TYPE_CHECKING:
     from fairque.core.models import Task
@@ -51,4 +49,4 @@ class Executable(ABC):
 
 
 if TYPE_CHECKING:
-    from fairque.core.pipeline import Pipeline, ParallelGroup
+    from fairque.core.pipeline import ParallelGroup, Pipeline

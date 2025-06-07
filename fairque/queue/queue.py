@@ -541,19 +541,19 @@ class TaskQueue:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get comprehensive queue statistics.
-        
+
         Returns:
             Dictionary with queue statistics
         """
         try:
             response_str = self.lua_manager.execute_script("stats")
             response: Dict[str, Any] = json.loads(response_str)
-            
+
             if not response.get("success", False):
                 error_message = response.get("message", "Unknown error")
                 logger.error(f"Failed to get stats: {error_message}")
                 return {}
-                
+
             return response.get("data", {})
         except (LuaScriptError, json.JSONDecodeError) as e:
             logger.error(f"Failed to get stats: {e}")
@@ -561,14 +561,14 @@ class TaskQueue:
 
     def get_health(self) -> Dict[str, Any]:
         """Get queue health information.
-        
+
         Returns:
             Dictionary with health status
         """
         try:
             stats = self.get_stats()
             active_tasks = stats.get("tasks_active", 0)
-            
+
             # TODO: Determine health status
             status = "healthy"
 
@@ -585,10 +585,10 @@ class TaskQueue:
 
     def get_queue_sizes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Get queue sizes for a specific user or overall stats.
-        
+
         Args:
             user_id: Optional user ID to get sizes for specific user
-            
+
         Returns:
             Dictionary with queue size information
         """
@@ -601,35 +601,35 @@ class TaskQueue:
         """Get queue sizes for multiple users."""
         result = {}
         totals = {"critical_size": 0, "normal_size": 0, "total_size": 0}
-        
+
         for user_id in user_ids:
             user_sizes = self.get_user_queue_sizes(user_id)
             result[user_id] = user_sizes
             totals["critical_size"] += user_sizes.get("critical_size", 0)
-            totals["normal_size"] += user_sizes.get("normal_size", 0) 
+            totals["normal_size"] += user_sizes.get("normal_size", 0)
             totals["total_size"] += user_sizes.get("total_size", 0)
-            
+
         result["totals"] = totals
         return result
 
     def cleanup_expired_tasks(self, max_age_seconds: int = 86400) -> int:
         """Clean up expired tasks.
-        
+
         Args:
             max_age_seconds: Maximum age for tasks before cleanup
-            
+
         Returns:
             Number of tasks cleaned up
         """
         import time
         current_time = time.time()
         cutoff_time = current_time - max_age_seconds
-        
+
         try:
             # Scan for task keys
             task_keys = list(self.redis.scan_iter(match="task:*"))
             cleaned_count = 0
-            
+
             for task_key in task_keys:
                 # Get task creation time
                 created_at_str = self.redis.hget(task_key, "created_at")
@@ -643,7 +643,7 @@ class TaskQueue:
                     except (ValueError, TypeError):
                         # Invalid timestamp, skip
                         continue
-                        
+
             return cleaned_count
         except Exception as e:
             logger.error(f"Failed to cleanup expired tasks: {e}")

@@ -8,13 +8,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 from fairque.core.exceptions import TaskSerializationError
 from fairque.core.interfaces import Executable
 
 if TYPE_CHECKING:
-    from fairque.core.pipeline import ParallelGroup, Pipeline
     from fairque.core.xcom import XComManager
 
 logger = logging.getLogger(__name__)
