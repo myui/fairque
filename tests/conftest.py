@@ -1,9 +1,12 @@
 """Test configuration and fixtures for FairQueue tests."""
 
+import time
 from typing import Generator
 from unittest.mock import MagicMock
 
+import docker
 import pytest
+import redis
 
 from fairque import FairQueueConfig, TaskQueue
 from fairque.core.config import QueueConfig, RedisConfig, WorkerConfig
@@ -64,9 +67,54 @@ def fairqueue_config(
     )
 
 
+@pytest.fixture(scope="session")
+def redis_server():
+    """Real Redis server using Docker container for integration tests."""
+    container = None
+    try:
+        # Try to use Docker first
+        client = docker.from_env()
+        container = client.containers.run(
+            "redis:7.2",
+            ports={'6379/tcp': 6379},
+            detach=True,
+            remove=True
+        )
+        time.sleep(2)  # Wait for Redis to be ready
+
+        # Create Redis client and verify connection
+        redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+        try:
+            redis_client.ping()
+        except redis.ConnectionError:
+            time.sleep(2)  # Additional wait if needed
+            redis_client.ping()
+
+        yield redis_client
+
+        # Cleanup
+        container.stop()
+
+    except Exception as e:
+        # Fallback to local Redis if Docker is not available
+        if container:
+            try:
+                container.stop()
+            except:
+                pass
+
+        # Try to connect to local Redis
+        try:
+            redis_client = redis.Redis(host='localhost', port=6379, db=15, decode_responses=True)
+            redis_client.ping()
+            pytest.skip(f"Docker not available ({e}), skipping integration tests that require isolated Redis")
+        except redis.ConnectionError:
+            pytest.skip(f"Neither Docker nor local Redis available for integration tests: {e}")
+
+
 @pytest.fixture
 def redis_client(redis_config: RedisConfig) -> Generator[MagicMock, None, None]:
-    """Mocked Redis client for tests."""
+    """Mocked Redis client for unit tests."""
     mock_client = MagicMock()
     mock_client.ping.return_value = True
     mock_client.flushdb.return_value = True
@@ -97,9 +145,28 @@ def redis_client(redis_config: RedisConfig) -> Generator[MagicMock, None, None]:
 
 
 @pytest.fixture
+def redis_client_integration(redis_server):
+    """Real Redis client for integration tests."""
+    # Clean the database before each test
+    redis_server.flushall()
+    yield redis_server
+    # Clean up after each test
+    redis_server.flushall()
+
+
+@pytest.fixture
 def fairqueue(fairqueue_config: FairQueueConfig, redis_client: MagicMock) -> Generator[TaskQueue, None, None]:
-    """FairQueue instance for tests with mocked Redis."""
+    """FairQueue instance for unit tests with mocked Redis."""
     queue = TaskQueue(fairqueue_config, redis_client)
+    yield queue
+    # Cleanup
+    queue.close()
+
+
+@pytest.fixture
+def fairqueue_integration(fairqueue_config: FairQueueConfig, redis_client_integration) -> Generator[TaskQueue, None, None]:
+    """FairQueue instance for integration tests with real Redis."""
+    queue = TaskQueue(fairqueue_config, redis_client_integration)
     yield queue
     # Cleanup
     queue.close()

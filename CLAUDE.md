@@ -13,8 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv run pytest                                      # Run all tests
 uv run pytest --cov=fairque --cov-report=html    # Run tests with coverage
 uv run pytest tests/unit/                         # Unit tests only  
-uv run pytest tests/integration/                  # Integration tests only
-uv run pytest tests/performance/                  # Performance tests only
+uv run pytest tests/integration/                  # Integration tests only (Docker Redis)
+uv run pytest tests/performance/                  # Performance tests only (Docker Redis)
 uv run pytest -k "test_specific_function"         # Run specific test
 ```
 
@@ -173,12 +173,31 @@ schedule_id = scheduler.add_schedule("0 12 * * *", task)
 
 ## Testing
 
-**Test Database:** Uses Redis database 15 (isolated from production)
+**Unit Tests:** Use mocked Redis client for fast isolated testing
+
+**Integration Tests:** Use Docker Redis container (redis:7.2) for realistic testing
+- Requires Docker to be running for full integration tests
+- Falls back to skipping tests if Docker is unavailable
+- Uses isolated Redis container on port 6379 (not your local Redis)
+
+**Performance Tests:** Use Docker Redis container (redis:7.2) for benchmarking
+- Requires Docker to be running for performance benchmarks
+- Falls back to skipping tests if Docker is unavailable  
+- Uses isolated Redis container on port 6380 to avoid conflicts
 
 **Key Fixtures:**
-- `redis_client` - Redis client with automatic cleanup
-- `fairqueue` - FairQueue instance with test configuration
+- `redis_client` - Mocked Redis client for unit tests  
+- `redis_client_integration` - Real Docker Redis for integration tests (port 6379)
+- `redis_server_performance` - Real Docker Redis for performance tests (port 6380)
+- `fairqueue` - FairQueue instance with mocked Redis
+- `fairqueue_integration` - FairQueue instance with Docker Redis
 - `worker_config` - Fast polling for quick tests
+
+**Docker Setup:**
+- **Integration tests:** Redis 7.2 container on port 6379, auto-cleanup
+- **Performance tests:** Redis 7.2 container on port 6380, auto-cleanup
+- Clean database before/after each test
+- Stop and remove containers after test session
 
 **Redis Connection:** Tests automatically clean up Redis data before/after execution
 

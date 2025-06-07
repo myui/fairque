@@ -13,7 +13,7 @@ from fairque.worker.worker import TaskHandler, Worker
 from tests.performance.conftest import create_test_tasks
 
 
-class TestTaskHandler(TaskHandler):
+class PerformanceTaskHandler(TaskHandler):
     """Test implementation of TaskHandler."""
 
     def __init__(self, processing_time: float = 0.001, fail_rate: float = 0.0):
@@ -43,7 +43,7 @@ class TestTaskHandler(TaskHandler):
         return True
 
 
-class AsyncTestTaskHandler(AsyncTaskHandler):
+class AsyncPerformanceTaskHandler(AsyncTaskHandler):
     """Test implementation of AsyncTaskHandler."""
 
     def __init__(self, processing_time: float = 0.001, fail_rate: float = 0.0):
@@ -83,7 +83,7 @@ class TestWorkerPerformance:
         task_queue.push_batch(tasks)
 
         # Create worker with test handler
-        handler = TestTaskHandler(processing_time=0.001)
+        handler = PerformanceTaskHandler(processing_time=0.001)
         worker = Worker(
             config=fairqueue_config,
             task_handler=handler,
@@ -131,7 +131,7 @@ class TestWorkerPerformance:
         # Create workers
         workers_data = []
         for _ in range(num_workers):
-            handler = TestTaskHandler(processing_time=0.001)
+            handler = PerformanceTaskHandler(processing_time=0.001)
             worker = Worker(
                 config=fairqueue_config,
                 task_handler=handler,
@@ -195,8 +195,8 @@ class TestWorkerPerformance:
         task_queue.push_batch(tasks)
 
         # Create two workers - worker1 (owner) and worker2 (stealer)
-        handler1 = TestTaskHandler(processing_time=0.002)  # Slower
-        handler2 = TestTaskHandler(processing_time=0.001)  # Faster
+        handler1 = PerformanceTaskHandler(processing_time=0.002)  # Slower
+        handler2 = PerformanceTaskHandler(processing_time=0.001)  # Faster
 
         worker1 = Worker(
             config=fairqueue_config,
@@ -256,7 +256,7 @@ class TestAsyncWorkerPerformance:
         await async_task_queue.push_batch(tasks)
 
         # Create async worker with test handler
-        handler = AsyncTestTaskHandler(processing_time=0.001)
+        handler = AsyncPerformanceTaskHandler(processing_time=0.001)
         worker = AsyncWorker(
             config=fairqueue_config,
             task_handler=handler,
@@ -300,7 +300,7 @@ class TestAsyncWorkerPerformance:
         await async_task_queue.push_batch(tasks)
 
         # Create async worker with concurrent processing
-        handler = AsyncTestTaskHandler(processing_time=0.01)  # 10ms per task
+        handler = AsyncPerformanceTaskHandler(processing_time=0.01)  # 10ms per task
 
         # Note: We can't modify config attributes directly, so we'll just use the default
         worker = AsyncWorker(

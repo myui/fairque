@@ -220,13 +220,26 @@ local response = {
     }
 }
 
--- Simple JSON serialization
+-- Simple JSON serialization with proper escaping
+local function escape_json_string(str)
+    if str == nil then
+        return "null"
+    end
+    -- Escape double quotes and backslashes
+    str = string.gsub(str, "\\", "\\\\")
+    str = string.gsub(str, '"', '\\"')
+    str = string.gsub(str, "\n", "\\n")
+    str = string.gsub(str, "\r", "\\r")
+    str = string.gsub(str, "\t", "\\t")
+    return '"' .. str .. '"'
+end
+
 local function serialize_table(tbl)
     local items = {}
     for k, v in pairs(tbl) do
         local value_str
         if type(v) == "string" then
-            value_str = '"' .. v .. '"'
+            value_str = escape_json_string(v)
         elseif type(v) == "table" then
             value_str = serialize_table(v)
         elseif v == nil then
@@ -234,7 +247,7 @@ local function serialize_table(tbl)
         else
             value_str = tostring(v)
         end
-        table.insert(items, '"' .. k .. '":' .. value_str)
+        table.insert(items, escape_json_string(k) .. ":" .. value_str)
     end
     return "{" .. table.concat(items, ",") .. "}"
 end

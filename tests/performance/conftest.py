@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, List
 
+import docker
 import pytest
 import redis
 import redis.asyncio as async_redis
@@ -243,28 +244,85 @@ class PerformanceBenchmark:
         }
 
 
-@pytest.fixture
-def redis_client():
-    """Create Redis client for testing."""
-    client = redis.Redis(host="localhost", port=6379, db=15, decode_responses=False)
-    # Clean test database
-    client.flushdb()
-    yield client
-    # Cleanup
-    client.flushdb()
-    client.close()
+@pytest.fixture(scope="session")
+def redis_server_performance():
+    """Real Redis server using Docker container for performance tests."""
+    container = None
+    try:
+        # Try to use Docker first
+        client = docker.from_env()
+        container = client.containers.run(
+            "redis:7.2",
+            ports={'6379/tcp': 6380},  # Use different port to avoid conflicts
+            detach=True,
+            remove=True
+        )
+        time.sleep(3)  # Wait for Redis to be ready
+
+        # Create Redis client and verify connection
+        redis_client = redis.Redis(host='localhost', port=6380, decode_responses=False)
+        try:
+            redis_client.ping()
+        except redis.ConnectionError:
+            time.sleep(2)  # Additional wait if needed
+            redis_client.ping()
+
+        yield redis_client
+
+        # Cleanup
+        container.stop()
+
+    except Exception as e:
+        # Fallback to local Redis if Docker is not available
+        if container:
+            try:
+                container.stop()
+            except:
+                pass
+
+        # Try to connect to local Redis
+        try:
+            redis_client = redis.Redis(host='localhost', port=6379, db=15, decode_responses=False)
+            redis_client.ping()
+            pytest.skip(f"Docker not available ({e}), skipping performance tests that require isolated Redis")
+        except redis.ConnectionError:
+            pytest.skip(f"Neither Docker nor local Redis available for performance tests: {e}")
 
 
 @pytest.fixture
-async def async_redis_client():
-    """Create async Redis client for testing."""
-    client = async_redis.Redis(host="localhost", port=6379, db=15, decode_responses=False)
-    # Clean test database
-    await client.flushdb()
-    yield client
-    # Cleanup
-    await client.flushdb()
-    await client.close()
+def redis_client(redis_server_performance):
+    """Create Redis client for performance testing."""
+    # Clean test database before each test
+    redis_server_performance.flushall()
+    yield redis_server_performance
+    # Clean up after each test
+    redis_server_performance.flushall()
+
+
+@pytest.fixture
+async def async_redis_client(redis_server_performance):
+    """Create async Redis client for performance testing."""
+    # Clean test database before each test
+    redis_server_performance.flushall()
+
+    # Create async client using same connection details
+    if hasattr(redis_server_performance, 'connection_pool'):
+        connection_kwargs = redis_server_performance.connection_pool.connection_kwargs
+        host = connection_kwargs.get('host', 'localhost')
+        port = connection_kwargs.get('port', 6380)
+    else:
+        host = 'localhost'
+        port = 6380
+
+    client = async_redis.Redis(host=host, port=port, decode_responses=False)
+
+    try:
+        await client.ping()
+        yield client
+    finally:
+        # Clean up after each test
+        await client.flushall()
+        await client.close()
 
 
 @pytest.fixture
@@ -273,8 +331,8 @@ def fairqueue_config():
     return FairQueueConfig(
         redis=RedisConfig(
             host="localhost",
-            port=6379,
-            db=15,
+            port=6380,  # Use Docker Redis port
+            db=0,       # Use default database in Docker container
             decode_responses=False,
         ),
         workers=[

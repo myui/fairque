@@ -6,7 +6,7 @@ from typing import Any, Dict
 from fairque import Priority, Task, TaskHandler, TaskQueue, Worker
 
 
-class TestTaskHandler(TaskHandler):
+class IntegrationTaskHandler(TaskHandler):
     """Test task handler for integration tests."""
 
     def __init__(self):
@@ -41,7 +41,7 @@ class TestTaskHandler(TaskHandler):
 class TestFairQueueIntegration:
     """Integration tests for complete FairQueue workflow."""
 
-    def test_complete_workflow(self, fairqueue: TaskQueue, sample_payload: Dict[str, Any]) -> None:
+    def test_complete_workflow(self, fairqueue_integration: TaskQueue, sample_payload: Dict[str, Any]) -> None:
         """Test complete push -> pop -> process workflow."""
         # Create tasks with different priorities
         tasks = []
@@ -52,29 +52,29 @@ class TestFairQueueIntegration:
                 payload={**sample_payload, "task_number": i}
             )
             tasks.append(task)
-            fairqueue.push(task)
+            fairqueue_integration.push(task)
 
         # Verify tasks were pushed
-        stats = fairqueue.get_stats()
+        stats = fairqueue_integration.get_stats()
         assert stats.get("tasks_active", 0) == 3
 
         # Pop tasks and verify priority ordering
         popped_tasks = []
         for _ in range(3):
-            task = fairqueue.pop(["test:user:1"])
+            task = fairqueue_integration.pop(["test:user:1"])
             if task:
                 popped_tasks.append(task)
-                fairqueue.delete_task(task.task_id)
+                fairqueue_integration.delete_task(task.task_id)
 
         assert len(popped_tasks) == 3
         # CRITICAL should be first
         assert popped_tasks[0].priority == Priority.CRITICAL
 
         # Verify final state
-        final_stats = fairqueue.get_stats()
+        final_stats = fairqueue_integration.get_stats()
         assert final_stats.get("tasks_active", 0) == 0
 
-    def test_multi_user_work_stealing(self, fairqueue: TaskQueue, sample_payload: Dict[str, Any]) -> None:
+    def test_multi_user_work_stealing(self, fairqueue_integration: TaskQueue, sample_payload: Dict[str, Any]) -> None:
         """Test work stealing across multiple users."""
         # Push tasks for different users
         user_tasks = {}
@@ -85,10 +85,10 @@ class TestFairQueueIntegration:
                 payload={**sample_payload, "user": user_id}
             )
             user_tasks[user_id] = task
-            fairqueue.push(task)
+            fairqueue_integration.push(task)
 
         # Get batch queue sizes
-        sizes = fairqueue.get_batch_queue_sizes(list(user_tasks.keys()))
+        sizes = fairqueue_integration.get_batch_queue_sizes(list(user_tasks.keys()))
         assert sizes["totals"]["total_size"] == 4
 
         # Pop all tasks (should work across users due to work stealing)
@@ -96,10 +96,10 @@ class TestFairQueueIntegration:
         user_list = ["test:user:1", "test:user:2", "test:user:3", "test:user:4"]
 
         for _ in range(4):
-            task = fairqueue.pop(user_list)
+            task = fairqueue_integration.pop(user_list)
             if task:
                 popped_tasks.append(task)
-                fairqueue.delete_task(task.task_id)
+                fairqueue_integration.delete_task(task.task_id)
 
         assert len(popped_tasks) == 4
 
@@ -107,7 +107,7 @@ class TestFairQueueIntegration:
         processed_users = {task.user_id for task in popped_tasks}
         assert len(processed_users) == 4
 
-    def test_priority_mixed_users(self, fairqueue: TaskQueue, sample_payload: Dict[str, Any]) -> None:
+    def test_priority_mixed_users(self, fairqueue_integration: TaskQueue, sample_payload: Dict[str, Any]) -> None:
         """Test priority handling with mixed users."""
         # Create tasks with different priorities for different users
         test_cases = [
@@ -125,18 +125,18 @@ class TestFairQueueIntegration:
                 payload={**sample_payload, "user": user_id, "priority": priority.name}
             )
             pushed_tasks.append(task)
-            fairqueue.push(task)
+            fairqueue_integration.push(task)
 
         # Pop all tasks
         popped_tasks = []
         user_list = ["test:user:1", "test:user:2", "test:user:3"]
 
         while True:
-            task = fairqueue.pop(user_list)
+            task = fairqueue_integration.pop(user_list)
             if not task:
                 break
             popped_tasks.append(task)
-            fairqueue.delete_task(task.task_id)
+            fairqueue_integration.delete_task(task.task_id)
 
         assert len(popped_tasks) == 4
 
@@ -148,12 +148,12 @@ class TestFairQueueIntegration:
 class TestWorkerIntegration:
     """Integration tests with Worker processing."""
 
-    def test_worker_basic_processing(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_worker_basic_processing(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test basic worker task processing."""
-        task_handler = TestTaskHandler()
+        task_handler = IntegrationTaskHandler()
         task_handler.processing_time = 0.05  # Fast processing for test
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             # Push some tasks
             tasks = []
             for i in range(3):
@@ -183,12 +183,12 @@ class TestWorkerIntegration:
             assert worker_stats["tasks_processed"] == 3
             assert worker_stats["tasks_failed"] == 0
 
-    def test_worker_with_failures(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_worker_with_failures(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test worker handling task failures."""
-        task_handler = TestTaskHandler()
+        task_handler = IntegrationTaskHandler()
         task_handler.processing_time = 0.05
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             # Push tasks - some will fail
             tasks = []
             for i in range(4):
@@ -220,15 +220,15 @@ class TestWorkerIntegration:
             assert worker_stats["tasks_processed"] == 2
             assert worker_stats["tasks_failed"] == 2
 
-    def test_worker_concurrent_processing(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_worker_concurrent_processing(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test worker concurrent task processing."""
-        task_handler = TestTaskHandler()
+        task_handler = IntegrationTaskHandler()
         task_handler.processing_time = 0.2  # Longer processing to test concurrency
 
         # Update config for concurrent processing
         fairqueue_config.worker.max_concurrent_tasks = 3
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             # Push multiple tasks
             tasks = []
             for i in range(5):
@@ -257,12 +257,12 @@ class TestWorkerIntegration:
             assert processing_time < 1.0  # Should be much faster than sequential (1.0s)
             assert len(task_handler.processed_tasks) == 5
 
-    def test_worker_graceful_shutdown(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_worker_graceful_shutdown(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test worker graceful shutdown."""
-        task_handler = TestTaskHandler()
+        task_handler = IntegrationTaskHandler()
         task_handler.processing_time = 0.3  # Longer processing
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             # Push tasks
             for i in range(3):
                 task = Task.create(
@@ -288,11 +288,11 @@ class TestWorkerIntegration:
             # Should have waited for active tasks (but not too long due to our timeout)
             assert stop_duration < fairqueue_config.worker.graceful_shutdown_timeout + 1
 
-    def test_worker_health_check(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_worker_health_check(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test worker health monitoring."""
-        task_handler = TestTaskHandler()
+        task_handler = IntegrationTaskHandler()
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             worker = Worker(fairqueue_config, task_handler, queue)
 
             # Worker not started - should be unhealthy
@@ -311,11 +311,11 @@ class TestWorkerIntegration:
 class TestConcurrentWorkers:
     """Test multiple workers processing tasks concurrently."""
 
-    def test_multiple_workers_same_queue(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_multiple_workers_same_queue(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test multiple workers processing from the same queue."""
         # Create two task handlers
-        handler1 = TestTaskHandler()
-        handler2 = TestTaskHandler()
+        handler1 = IntegrationTaskHandler()
+        handler2 = IntegrationTaskHandler()
 
         # Fast processing
         handler1.processing_time = 0.05
@@ -329,7 +329,7 @@ class TestConcurrentWorkers:
         config2.worker.id = "worker-2"
         config2.worker.assigned_users = ["test:user:3", "test:user:4"]
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             # Push tasks for different users
             tasks = []
             all_users = ["test:user:1", "test:user:2", "test:user:3", "test:user:4"]
@@ -392,7 +392,7 @@ class TestErrorRecovery:
             assert popped_task is not None
             assert popped_task.task_id == task.task_id
 
-    def test_worker_error_handling(self, fairqueue_config, redis_client, sample_payload: Dict[str, Any]) -> None:
+    def test_worker_error_handling(self, fairqueue_config, redis_client_integration, sample_payload: Dict[str, Any]) -> None:
         """Test worker handling of various error conditions."""
 
         class ErrorTaskHandler(TaskHandler):
@@ -418,7 +418,7 @@ class TestErrorRecovery:
 
         task_handler = ErrorTaskHandler()
 
-        with TaskQueue(fairqueue_config, redis_client) as queue:
+        with TaskQueue(fairqueue_config, redis_client_integration) as queue:
             # Push tasks
             for i in range(3):
                 task = Task.create(
