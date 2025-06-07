@@ -1,7 +1,7 @@
 """Tests for async queue implementation."""
 
-import asyncio
-from unittest.mock import patch
+import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -10,7 +10,7 @@ from fairque.core.exceptions import LuaScriptError, TaskValidationError
 
 
 @pytest.fixture
-async def async_queue_config():
+def async_queue_config():
     """Create test configuration for async queue."""
     return FairQueueConfig.from_dict({
         "redis": {
@@ -31,11 +31,20 @@ async def async_queue_config():
 
 @pytest.fixture
 async def async_queue(async_queue_config):
-    """Create test async queue instance."""
+    """Create test async queue instance with mocked Redis."""
     queue = AsyncTaskQueue(async_queue_config)
-    await queue.initialize()
-    yield queue
-    await queue.close()
+
+    # Mock Redis client
+    mock_redis = AsyncMock()
+    mock_redis.ping.return_value = True
+
+    # Mock Lua manager
+    mock_lua_manager = AsyncMock()
+
+    with patch.object(queue, 'redis', mock_redis), \
+         patch.object(queue, 'lua_manager', mock_lua_manager):
+        queue._initialized = True  # Skip actual Redis initialization
+        yield queue
 
 
 @pytest.fixture
@@ -58,17 +67,22 @@ class TestAsyncTaskQueue:
         queue = AsyncTaskQueue(async_queue_config)
 
         # Test that queue is not initialized yet
-        assert not hasattr(queue, 'redis') or queue.redis is None
+        assert not hasattr(queue, '_initialized') or not queue._initialized
 
-        # Initialize and test
-        await queue.initialize()
-        assert queue.redis is not None
+        # Mock Redis and initialize
+        with patch('fairque.queue.async_queue.redis.Redis') as mock_redis_class:
+            mock_redis_instance = AsyncMock()
+            mock_redis_instance.ping.return_value = True
+            mock_redis_class.return_value = mock_redis_instance
 
-        # Test connection
-        result = await queue.redis.ping()
-        assert result is True
+            await queue.initialize()
+            assert queue.redis is not None
 
-        await queue.close()
+            # Test connection
+            result = await queue.redis.ping()
+            assert result is True
+
+            await queue.close()
 
     @pytest.mark.asyncio
     async def test_push_task(self, async_queue, sample_task):
@@ -111,7 +125,7 @@ class TestAsyncTaskQueue:
         }
 
         with patch.object(async_queue.lua_manager, 'execute_script') as mock_script:
-            mock_script.return_value = f'{{"success": true, "data": {mock_task_data}}}'
+            mock_script.return_value = json.dumps({"success": True, "data": mock_task_data})
 
             task = await async_queue.pop()
 
@@ -142,7 +156,7 @@ class TestAsyncTaskQueue:
         }
 
         with patch.object(async_queue.lua_manager, 'execute_script') as mock_script:
-            mock_script.return_value = f'{{"success": true, "data": {mock_stats}}}'
+            mock_script.return_value = json.dumps({"success": True, "data": mock_stats})
 
             stats = await async_queue.get_stats()
 
@@ -159,7 +173,7 @@ class TestAsyncTaskQueue:
         }
 
         with patch.object(async_queue.lua_manager, 'execute_script') as mock_script:
-            mock_script.return_value = f'{{"success": true, "data": {mock_sizes}}}'
+            mock_script.return_value = json.dumps({"success": True, "data": mock_sizes})
 
             sizes = await async_queue.get_queue_sizes("user1")
 
@@ -201,25 +215,35 @@ class TestAsyncTaskQueue:
     @pytest.mark.asyncio
     async def test_cleanup_expired_tasks(self, async_queue):
         """Test cleaning up expired tasks."""
-        with patch.object(async_queue.redis, 'scan_iter') as mock_scan, \
-             patch.object(async_queue.redis, 'hget') as mock_hget, \
-             patch.object(async_queue.redis, 'delete') as mock_delete:
+        # Create a mock async iterator
+        class MockAsyncIterator:
+            def __init__(self, items):
+                self.items = items
+                self.index = 0
 
-            # Mock scan results
-            mock_scan.return_value = [
-                "task:old-task-1",
-                "task:old-task-2",
-                "task:recent-task"
-            ].__aiter__()
+            def __aiter__(self):
+                return self
 
-            # Mock hget results (old timestamp, old timestamp, recent timestamp)
-            mock_hget.side_effect = ["1000000", "1000000", str(asyncio.get_event_loop().time())]
-            mock_delete.return_value = 1
+            async def __anext__(self):
+                if self.index >= len(self.items):
+                    raise StopAsyncIteration
+                item = self.items[self.index]
+                self.index += 1
+                return item
 
-            cleanup_count = await async_queue.cleanup_expired_tasks(max_age_seconds=86400)
+        # Mock scan_iter to return our async iterator
+        async_queue.redis.scan_iter = lambda **kwargs: MockAsyncIterator(["task:old-task-1", "task:old-task-2", "task:recent-task"])
 
-            assert cleanup_count == 2  # Two old tasks cleaned up
-            assert mock_delete.call_count == 2
+        # Mock hget results (old timestamp, old timestamp, recent timestamp)
+        import time
+        current_time = time.time()
+        async_queue.redis.hget.side_effect = ["1000000", "1000000", str(current_time)]
+        async_queue.redis.delete.return_value = 1
+
+        cleanup_count = await async_queue.cleanup_expired_tasks(max_age_seconds=86400)
+
+        assert cleanup_count == 2  # Two old tasks cleaned up
+        assert async_queue.redis.delete.call_count == 2
 
     @pytest.mark.asyncio
     async def test_lua_script_error_handling(self, async_queue, sample_task):
@@ -233,15 +257,20 @@ class TestAsyncTaskQueue:
     @pytest.mark.asyncio
     async def test_context_manager(self, async_queue_config):
         """Test async context manager functionality."""
-        async with AsyncTaskQueue(async_queue_config) as queue:
-            assert queue.redis is not None
+        with patch('fairque.queue.async_queue.redis.Redis') as mock_redis_class:
+            mock_redis_instance = AsyncMock()
+            mock_redis_instance.ping.return_value = True
+            mock_redis_class.return_value = mock_redis_instance
 
-            # Test that we can use the queue
-            result = await queue.redis.ping()
-            assert result is True
+            async with AsyncTaskQueue(async_queue_config) as queue:
+                assert queue.redis is not None
 
-        # After context exit, connection should be closed
-        # Note: We can't easily test this as aclose() might not change the state immediately
+                # Test that we can use the queue
+                result = await queue.redis.ping()
+                assert result is True
+
+            # After context exit, connection should be closed
+            mock_redis_instance.aclose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_batch_queue_sizes(self, async_queue):
@@ -253,7 +282,7 @@ class TestAsyncTaskQueue:
         }
 
         with patch.object(async_queue.lua_manager, 'execute_script') as mock_script:
-            mock_script.return_value = f'{{"success": true, "data": {mock_batch_sizes}}}'
+            mock_script.return_value = json.dumps({"success": True, "data": mock_batch_sizes})
 
             sizes = await async_queue.get_batch_queue_sizes(["user1", "user2"])
 
@@ -270,7 +299,7 @@ class TestAsyncTaskQueue:
         }
 
         with patch.object(async_queue.lua_manager, 'execute_script') as mock_script:
-            mock_script.return_value = f'{{"success": true, "data": {mock_health}}}'
+            mock_script.return_value = json.dumps({"success": True, "data": mock_health})
 
             health = await async_queue.get_health()
 

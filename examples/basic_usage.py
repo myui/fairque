@@ -99,7 +99,6 @@ def main() -> None:
         health = queue.get_health()
         print(f"Status: {health.get('status', 'unknown')}")
         print(f"Active tasks: {health.get('active_tasks', 0)}")
-        print(f"DLQ size: {health.get('dlq_size', 0)}")
 
         if health.get("warnings"):
             print("Warnings:")

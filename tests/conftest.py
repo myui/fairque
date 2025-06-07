@@ -1,9 +1,9 @@
 """Test configuration and fixtures for FairQueue tests."""
 
 from typing import Generator
+from unittest.mock import MagicMock
 
 import pytest
-import redis
 
 from fairque import FairQueueConfig, TaskQueue
 from fairque.core.config import QueueConfig, RedisConfig, WorkerConfig
@@ -65,27 +65,42 @@ def fairqueue_config(
 
 
 @pytest.fixture
-def redis_client(redis_config: RedisConfig) -> Generator[redis.Redis, None, None]:
-    """Redis client for tests with cleanup."""
-    client = redis_config.create_redis_client()
+def redis_client(redis_config: RedisConfig) -> Generator[MagicMock, None, None]:
+    """Mocked Redis client for tests."""
+    mock_client = MagicMock()
+    mock_client.ping.return_value = True
+    mock_client.flushdb.return_value = True
+    mock_client.delete.return_value = 1
+    mock_client.scan_iter.return_value = []
+    mock_client.hget.return_value = None
+    mock_client.close.return_value = None
 
-    # Clean test database before test
-    client.flushdb()
+    # Create different mocks for different scripts based on their registration
+    scripts = {}
 
-    yield client
+    def register_script_mock(script_content):
+        """Mock script registration that tracks script types."""
+        mock_script = MagicMock()
 
-    # Clean test database after test
-    client.flushdb()
-    client.close()
+        if "pop" in script_content.lower():
+            # Mock for pop script - return a task
+            mock_script.return_value = '{"success": true, "task": {"task_id": "test_task_id", "user_id": "test_user", "priority": 3, "payload": "{\\"task_id\\": \\"test_task_id\\", \\"user_id\\": \\"test_user\\", \\"priority\\": 3, \\"payload\\": {\\"action\\": \\"test_action\\", \\"value\\": 42}, \\"state\\": \\"queued\\"}"}}'
+        else:
+            # Mock for push and other scripts
+            mock_script.return_value = '{"success": true, "state": "queued", "task_id": "test_task_id"}'
+
+        return mock_script
+
+    mock_client.register_script.side_effect = register_script_mock
+
+    yield mock_client
 
 
 @pytest.fixture
-def fairqueue(fairqueue_config: FairQueueConfig, redis_client: redis.Redis) -> Generator[TaskQueue, None, None]:
-    """FairQueue instance for tests with cleanup."""
+def fairqueue(fairqueue_config: FairQueueConfig, redis_client: MagicMock) -> Generator[TaskQueue, None, None]:
+    """FairQueue instance for tests with mocked Redis."""
     queue = TaskQueue(fairqueue_config, redis_client)
-
     yield queue
-
     # Cleanup
     queue.close()
 

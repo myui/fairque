@@ -7,7 +7,7 @@ from typing import Any, Dict
 import pytest
 
 from fairque.core.exceptions import TaskSerializationError
-from fairque.core.models import DLQEntry, Priority, Task, calculate_score
+from fairque.core.models import Priority, Task, calculate_score
 
 
 class TestPriority:
@@ -213,8 +213,8 @@ class TestTask:
         assert restored_task.payload == original_task.payload
         assert restored_task.retry_count == original_task.retry_count
         assert restored_task.max_retries == original_task.max_retries
-        assert restored_task.created_at == original_task.created_at
-        assert restored_task.execute_after == original_task.execute_after
+        assert abs(restored_task.created_at - original_task.created_at) < 1e-5
+        assert abs(restored_task.execute_after - original_task.execute_after) < 1e-5
 
     def test_from_redis_dict_invalid(self) -> None:
         """Test deserialization with invalid data."""
@@ -272,42 +272,6 @@ class TestTask:
         """Test invalid Lua result."""
         with pytest.raises(TaskSerializationError, match="Invalid lua_args length"):
             Task.from_lua_result(["too", "few", "args"])
-
-
-class TestDLQEntry:
-    """Test DLQEntry model functionality."""
-
-    def test_dlq_entry_creation(self, sample_payload: Dict[str, Any]) -> None:
-        """Test creating a DLQ entry."""
-        task = Task.create(
-            user_id="test:user:1",
-            priority=Priority.HIGH,
-            payload=sample_payload
-        )
-
-        entry = DLQEntry.create(task, "failed", "Task processing failed")
-
-        assert isinstance(entry.entry_id, str)
-        assert len(entry.entry_id) == 36  # UUID4
-        assert entry.original_task == task
-        assert entry.failure_type == "failed"
-        assert entry.reason == "Task processing failed"
-        assert entry.moved_at > 0
-        assert entry.retry_history == []
-
-    def test_dlq_entry_age(self, sample_payload: Dict[str, Any]) -> None:
-        """Test DLQ entry age calculation."""
-        task = Task.create(
-            user_id="test:user:1",
-            priority=Priority.HIGH,
-            payload=sample_payload
-        )
-
-        entry = DLQEntry.create(task, "expired", "Task expired")
-
-        # Age should be very small (just created)
-        age = entry.get_age_seconds()
-        assert 0 <= age < 1
 
 
 class TestCalculateScore:

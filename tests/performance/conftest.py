@@ -290,10 +290,16 @@ def fairqueue_config():
             ),
         ],
         queue=QueueConfig(
-            max_queue_size=100000,
-            enable_dlq=True,
-            dlq_max_size=10000,
-            enable_stats=True,
+            stats_prefix="perf_fq",
+            lua_script_cache_size=100,
+            max_retry_attempts=3,
+            default_task_timeout=300.0,
+            default_max_retries=3,
+            enable_pipeline_optimization=True,
+            pipeline_batch_size=100,
+            pipeline_timeout=5.0,
+            queue_cleanup_interval=3600,
+            stats_aggregation_interval=300,
         ),
     )
 

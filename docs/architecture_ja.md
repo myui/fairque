@@ -45,7 +45,6 @@ graph TB
         R[Redis/Valkey]
         CQ[クリティカルキュー]
         NQ[ノーマルキュー]
-        DLQ[デッドレターキュー]
         ST[統計情報]
         SCH[スケジュール済みタスク]
     end
@@ -315,7 +314,6 @@ graph TB
     subgraph "Redisキー"
         CQ["queue:user:{user_id}:critical<br/>（リスト - FIFO）"]
         NQ["queue:user:{user_id}:normal<br/>（ソート済みセット - スコアベース）"]
-        DLQ["dlq<br/>（リスト - 失敗タスク）"]
         ST["queue:stats<br/>（ハッシュ - 統計情報）"]
     end
     
@@ -325,10 +323,6 @@ graph TB
     
     subgraph "優先度1-5タスク"
         T15[ノーマル優先度タスク] --> NQ
-    end
-    
-    subgraph "失敗タスク"
-        FT[失敗タスク] --> DLQ
     end
 ```
 
