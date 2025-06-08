@@ -188,6 +188,41 @@ class TestPipeline:
         task4_deps = set(tasks_by_id["task4"].depends_on)
         assert {"task2", "task3"}.issubset(task4_deps)
 
+    def test_nested_pipeline_complex(self):
+        """Test complex nested pipeline: task0 << (task1 << (task2 || task3)) >> task4."""
+        task0 = Task.create(task_id="task0", user_id="user1")
+        task1 = Task.create(task_id="task1", user_id="user1")
+        task2 = Task.create(task_id="task2", user_id="user1")
+        task3 = Task.create(task_id="task3", user_id="user1")
+        task4 = Task.create(task_id="task4", user_id="user1")
+
+        # Build the expression: task0 << (task1 << (task2 || task3)) >> task4
+        parallel_group = task2 | task3  # (task2 || task3)
+        task1_pipeline = task1 << parallel_group  # task1 << (task2 || task3)
+        task0_pipeline = task0 << task1_pipeline  # task0 << (task1 << (task2 || task3))
+        final_pipeline = task0_pipeline >> task4  # >> task4
+
+        expanded_tasks = final_pipeline.expand()
+
+        # Should have 5 tasks
+        assert len(expanded_tasks) == 5
+
+        # Check dependencies
+        task_dict = {task.task_id: task for task in expanded_tasks}
+
+        # task2 and task3 should have no dependencies
+        assert task_dict["task2"].depends_on == []
+        assert task_dict["task3"].depends_on == []
+
+        # task1 should depend on task2 and task3
+        assert set(task_dict["task1"].depends_on) == {"task2", "task3"}
+
+        # task0 should depend only on task1
+        assert task_dict["task0"].depends_on == ["task1"]
+
+        # task4 should depend only on task0
+        assert task_dict["task4"].depends_on == ["task0"]
+
     def test_cycle_detection(self):
         """Test that cycles are detected and prevented."""
         task1 = Task.create(task_id="task1", user_id="user1", depends_on=["task2"])

@@ -86,15 +86,16 @@ class SequentialGroup(TaskGroup):
         for i, task in enumerate(tasks):
             modified_task = task
 
-            # Add upstream dependencies
+            # Add dependencies
             if i == 0:
-                # First task gets group's upstream dependencies
+                # First task gets group's upstream dependencies only
                 if self._upstream_dependencies:
                     new_depends_on = list(set(task.depends_on) | self._upstream_dependencies)
                     modified_task = replace(task, depends_on=new_depends_on)
             else:
-                # Subsequent tasks depend on previous task
+                # Subsequent tasks depend on previous task only
                 prev_task_id = tasks[i-1].task_id
+                # Don't inherit group upstream dependencies for subsequent tasks
                 new_depends_on = list(set(task.depends_on) | {prev_task_id})
                 modified_task = replace(task, depends_on=new_depends_on)
 
@@ -106,6 +107,8 @@ class SequentialGroup(TaskGroup):
             expanded_tasks.append(modified_task)
 
         return expanded_tasks
+
+
 
 
 class ParallelGroup(TaskGroup):
@@ -132,6 +135,74 @@ class ParallelGroup(TaskGroup):
             expanded_tasks.append(modified_task)
 
         return expanded_tasks
+
+
+class NestedGroup(TaskGroup):
+    """Group that preserves internal task structure for nested pipelines."""
+
+    def expand_dependencies(self) -> List[Task]:
+        """Expand while preserving internal dependencies."""
+        tasks = self.get_tasks()
+        if not tasks:
+            return tasks
+
+        expanded_tasks = []
+
+        # Find entry points (tasks with no internal dependencies)
+        entry_points = set()
+        exit_points = set()
+        all_task_ids = {task.task_id for task in tasks}
+
+        for task in tasks:
+            # Entry point: no depends_on that are internal to this group
+            internal_deps = [dep for dep in task.depends_on if dep in all_task_ids]
+            if not internal_deps:
+                entry_points.add(task.task_id)
+
+            # Exit point: no other tasks in this group depend on it
+            is_exit = True
+            for other_task in tasks:
+                if task.task_id in other_task.depends_on:
+                    is_exit = False
+                    break
+            if is_exit:
+                exit_points.add(task.task_id)
+
+        for task in tasks:
+            modified_task = task
+
+            # Entry points get group's upstream dependencies
+            if task.task_id in entry_points and self._upstream_dependencies:
+                new_depends_on = list(set(task.depends_on) | self._upstream_dependencies)
+                modified_task = replace(task, depends_on=new_depends_on)
+
+            # Exit points get group's downstream dependents
+            if task.task_id in exit_points and self._downstream_dependents:
+                new_dependents = list(set(modified_task.dependents) | self._downstream_dependents)
+                modified_task = replace(modified_task, dependents=new_dependents)
+
+            expanded_tasks.append(modified_task)
+
+        return expanded_tasks
+
+    def get_exit_points(self) -> Set[str]:
+        """Get the task IDs that are exit points of this group."""
+        tasks = self.get_tasks()
+        if not tasks:
+            return set()
+
+        exit_points = set()
+        for task in tasks:
+            # Exit point: no other tasks in this group depend on it
+            is_exit = True
+            for other_task in tasks:
+                if task.task_id in other_task.depends_on:
+                    is_exit = False
+                    break
+            if is_exit:
+                exit_points.add(task.task_id)
+
+        return exit_points
 
 
 class Pipeline(Executable):
@@ -209,20 +280,34 @@ class Pipeline(Executable):
             elif isinstance(executable, Pipeline):
                 # Recursively expand nested pipelines
                 nested_tasks = executable.expand()
-                wrapper_group = SequentialGroup([TaskWrapper(task) for task in nested_tasks])
-                all_groups.append(wrapper_group)
+                nested_group = NestedGroup([TaskWrapper(task) for task in nested_tasks])
+                all_groups.append(nested_group)
             else:
                 # Wrap single tasks
-                wrapper_group = SequentialGroup([executable])
-                all_groups.append(wrapper_group)
+                single_group = SequentialGroup([executable])
+                all_groups.append(single_group)
 
         # Set up dependencies between groups
         for i in range(len(all_groups) - 1):
             current_group = all_groups[i]
             next_group = all_groups[i + 1]
 
-            # Next group depends on current group
-            next_group.add_upstream_dependency(current_group.get_task_ids())
+            # Determine which tasks in current group are "exit points"
+            if isinstance(current_group, ParallelGroup):
+                # For parallel groups, all tasks are exit points
+                last_task_ids = current_group.get_task_ids()
+            elif isinstance(current_group, NestedGroup):
+                # For nested groups, use the computed exit points
+                last_task_ids = current_group.get_exit_points()
+            elif len(current_group.get_tasks()) == 1:
+                # Single task - use it
+                last_task_ids = {current_group.get_tasks()[0].task_id}
+            else:
+                # Multiple tasks in SequentialGroup - last task is the exit point
+                tasks = current_group.get_tasks()
+                last_task_ids = {tasks[-1].task_id}
+
+            next_group.add_upstream_dependency(last_task_ids)
 
         # Expand all groups and collect tasks
         all_tasks = []
